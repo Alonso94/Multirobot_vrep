@@ -36,11 +36,18 @@ else:
     sys.exit("Error")
 
 
+
+start=0.0
+
 class Robot:
 
     def __init__(self, ID, num):
         self.ID = ID
         self.num = num
+        self.angles=[np.pi/2.0,0.0,-np.pi/2.0,-np.pi/2.0]
+        self.dir=0
+        self.r=0.0975
+        self.l=0.381
 
         # motors
         self.left_handle = self.get_handle("motor%d_left" % (self.num))
@@ -49,34 +56,58 @@ class Robot:
         self.ground = self.get_handle("Ground")
         self.robot_handle = self.get_handle("R%d" % (self.num))
         (code, pose) = vrep.simxGetObjectPosition(self.ID, self.robot_handle, -1, const_v.simx_opmode_streaming)
+        (code, rot) = vrep.simxGetObjectOrientation(self.ID, self.robot_handle, -1, const_v.simx_opmode_streaming)
         time.sleep(0.1)
 
     def get_handle(self, name):
+        # print(name)
         (check, handle) = vrep.simxGetObjectHandle(self.ID, name, const_v.simx_opmode_oneshot_wait)
         if check != 0:
             print("Couldn't find %s" % name)
         return handle
 
-    def get_position(self, handle):
-        (code, pose) = vrep.simxGetObjectPosition(self.ID, handle, -1, const_v.simx_opmode_buffer)
+    def get_position(self):
+        (code, pose) = vrep.simxGetObjectPosition(self.ID, self.robot_handle, -1, const_v.simx_opmode_buffer)
         return np.array(pose)
 
+    def get_phi(self):
+        (code, rot) = vrep.simxGetObjectOrientation(self.ID, self.robot_handle, -1, const_v.simx_opmode_buffer)
+        phi=rot[2]
+        return phi
+
+
     def position_xy(self):
-        pose = self.get_position(self.robot_handle)
-        x = (pose[0] + 2.25) /0.5
-        y = (pose[1] + 2.25) /0.5
+        pose = self.get_position()
+        time.sleep(0.1)
+        x = (pose[0] + 4.5)
+        y = (pose[1] + 4.5)
         return x,y
 
+    def rotate(self,angle):
+        phi=self.get_phi()
+        if phi<0:
+            phi+=2*np.pi
+        if phi<angle:
+            tmp=angle
+            angle=phi
+            phi=tmp
+        if(phi-angle<angle+(2*np.pi-phi)):
+            err=-(phi-angle)
+        else:
+            err=angle+2*np.pi-phi
+        w=err*self.l/(4.0*self.r)
+        if abs(w)>0.05:
+            self.move_robot(-w,w)
+
     def goto_xy(self,x,y):
-        x_= x*0.5-2.25
-        y_=y*0.5-2.25
-        z_=0.1388
-        pose=[x_,y_,z_]
-        code=vrep.simxSetObjectPosition(self.ID,self.robot_handle,-1,pose,const_v.simx_opmode_oneshot)
+        xr,yr=self.position_xy()
+        w=(x-yr)/(2*self.r)
+        self.move_robot(w/2,w/2)
+        if w<0.1:
+            self.move_robot(0.0,0.0)
 
     def get_image(self, cam_handle):
         (code, res, im) = vrep.simxGetVisionSensorImage(self.ID, cam_handle, 0, const_v.simx_opmode_buffer)
-        # print(code)
         img = np.array(im, dtype=np.uint8)
         img.resize([res[0], res[1], 3])
         img = cv2.flip(img, 0)
@@ -86,16 +117,39 @@ class Robot:
         code = vrep.simxSetJointTargetVelocity(self.ID, self.left_handle, v_left, const_v.simx_opmode_streaming)
         code = vrep.simxSetJointTargetVelocity(self.ID, self.right_handle, v_right, const_v.simx_opmode_streaming)
 
-
+points=[[0.0,0.0,np.pi/2],
+        [0.25,0.0,np.pi/2],
+        [1.0,0.0,np.pi/2],
+        [1.75,0.0,np.pi/2],
+        [2.0,0.0,np.pi/2],
+        [2.0,0.0,np.pi/2],
+        [2.0,0.0,np.pi/2],
+        [2.0,0.0,np.pi/2],
+        [2.0,0.0,0.0],
+        [2.0,0.0,0.0],
+        [2.0,0.0,0.0],
+        [2.0,0.0,0.0],
+        [2.0,0.0,0.0]]
 num_robots = 5
 R = []
 for i in range(num_robots):
     R.append(Robot(ID, i + 1))
-    x,y=R[i].position_xy()
 
-total_time_steps=10
-times=trange(total_time_steps)
-for _ in times:
-    for i in range(num_robots):
-        R[i].goto_xy(i,i)
-        time.sleep(0.5)
+start=time.time()
+for p in points:
+    start=time.time()
+    for r in R:
+        r.goto_xy(p[0], p[1])
+        r.rotate(p[2])
+    total_time=time.time()-start
+    time.sleep(1.0-total_time)
+
+for r in R:
+    r.move_robot(0.0,0.0)
+    time.sleep(0.1)
+#
+# total_time_steps=10
+# for _ in range(total_time_steps):
+#     for i in range(num_robots):
+#         R[i].goto_xy(i,i)
+#         time.sleep(0.5)
